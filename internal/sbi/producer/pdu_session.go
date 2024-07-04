@@ -110,6 +110,75 @@ func HandlePDUSessionSMContextCreate(isDone <-chan struct{},
 		SessionManagementSubscriptionDataRetrievalApi.
 		GetSmData(ctx, smContext.Supi, smDataParams); err != nil {
 		smContext.Log.Errorln("Get SessionManagementSubscriptionData error:", err)
+
+		smContext.Log.Infoln("Recovering with SessionManagementSubscriptionData from config and default values")
+		targetSnssai := smContext.SmContextCreateData.SNssai
+		var foundSnssai *factory.SnssaiUpfInfoItem // Initialize typed to nil
+
+		// Iterate through UPNodes to find matching SNssai
+		for _, upNode := range factory.SmfConfig.Configuration.UserPlaneInformation.UPNodes {
+			if upNode.SNssaiInfos == nil {
+				continue
+			}
+
+			// Iterate through SNssaiInfos of each UPNode
+			for _, snssaiInfo := range upNode.SNssaiInfos {
+				// Check if SNssai matches targetSnssai
+				if snssaiInfo.SNssai.Sst == targetSnssai.Sst && snssaiInfo.SNssai.Sd == targetSnssai.Sd {
+					foundSnssai = snssaiInfo // Assign found SNssai
+				}
+
+				// If a matching SNssai is found
+				if foundSnssai != nil {
+					// Retrieve DNN from foundSnssai
+					dnn := foundSnssai.DnnUpfInfoList[0].Dnn
+
+					// Define DNN configurations based on retrieved DNN
+					dnnConfigurations := map[string]models.DnnConfiguration{
+						dnn: {
+							PduSessionTypes: &models.PduSessionTypes{
+								DefaultSessionType: "IPV4",
+								AllowedSessionTypes: []models.PduSessionType{
+									"IPV4",
+								},
+							},
+							SscModes: &models.SscModes{
+								DefaultSscMode: "SSC_MODE_1",
+								AllowedSscModes: []models.SscMode{
+									"SSC_MODE_2",
+									"SSC_MODE_3",
+								},
+							},
+							IwkEpsInd: false,
+							Var5gQosProfile: &models.SubscribedDefaultQos{
+								Var5qi: 9,
+								Arp: &models.Arp{
+									PriorityLevel: 8,
+									PreemptCap:    "",
+									PreemptVuln:   "",
+								},
+								PriorityLevel: 8,
+							},
+							SessionAmbr: &models.Ambr{
+								Uplink:   "1000 Mbps",
+								Downlink: "1000 Mbps",
+							},
+							Var3gppChargingCharacteristics: "",
+							StaticIpAddress:                nil,
+							UpSecurity:                     nil,
+						},
+					}
+
+					// Assign DNN configuration to smContext based on its DNN
+					smContext.DnnConfiguration = dnnConfigurations[smContext.Dnn]
+
+					// Check if UP Security info is present in DNN configuration
+					if smContext.DnnConfiguration.UpSecurity != nil {
+						smContext.UpSecurity = smContext.DnnConfiguration.UpSecurity
+					}
+				}
+			}
+		}
 	} else {
 		defer func() {
 			if rspCloseErr := rsp.Body.Close(); rspCloseErr != nil {
